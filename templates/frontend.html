@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SousAI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f6;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 sm:p-8">
+
+    <div id="app" class="max-w-4xl mx-auto bg-white shadow-xl rounded-2xl p-6 sm:p-8">
+        <header class="mb-8">
+            <h1 class="text-4xl font-extrabold text-green-700 tracking-tight">SousAI</h1>
+            <p class="text-gray-500 mt-1">Get a detailed recipe, grocery list, and store locations instantly.</p>
+        </header>
+
+        <div class="mb-8">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div class="sm:col-span-2">
+                    <label for="dish-input" class="block text-lg font-medium text-gray-700 mb-2">What dish do you want to make?</label>
+                    <input type="text" id="dish-input" placeholder="e.g., Vegan Margherita Pizza"
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 transition duration-150 shadow-sm">
+                </div>
+                <div>
+                    <label for="servings-input" class="block text-lg font-medium text-gray-700 mb-2">Servings?</label>
+                    <input type="number" id="servings-input" value="4"
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 transition duration-150 shadow-sm">
+                </div>
+            </div>
+             <div class="mt-4">
+                <button id="generate-button"
+                        class="w-full px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition duration-150 transform hover:scale-105 shadow-md disabled:opacity-50">
+                    Generate Recipe & List
+                </button>
+            </div>
+        </div>
+
+        <div id="loading-indicator" class="hidden flex items-center justify-center space-x-2 p-4 text-green-600">
+            <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>Consulting Google Gemini...</span>
+        </div>
+
+        <div id="error-message" class="hidden p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg mb-4" role="alert"></div>
+
+        <div id="results-container" class="hidden mt-8">
+            <div class="mb-6 border-b pb-4">
+                 <h2 id="recipe-title" class="text-3xl font-bold text-gray-800"></h2>
+                 <div id="recipe-meta" class="flex items-center gap-4 mt-2 text-sm text-gray-500">
+                    </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div class="lg:col-span-1 bg-gray-50 p-4 rounded-xl shadow-inner">
+                    <h3 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2 border-gray-200">Grocery List & Locations</h3>
+                    <ul id="ingredient-list" class="space-y-3">
+                        </ul>
+                </div>
+
+                <div class="lg:col-span-2">
+                    <h3 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2 border-gray-200">Recipe Instructions</h3>
+                    <div id="recipe-steps" class="text-gray-600 leading-relaxed">
+                         <ol class="space-y-4 list-decimal list-inside">
+                            </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. CORE DATA STRUCTURES (JSON Medium) ---
+        const STORE_LAYOUT = {
+            "SR101_PARSIPPANY": {
+                "store_name": "ShopRite of Parsippany",
+                "aisle_map": [
+                    { "id": "A01", "name": "Produce", "categories": ["Fresh Vegetables", "Leafy Greens", "Fruits"] },
+                    { "id": "A07", "name": "Dairy & Refrigerated", "categories": ["Milk", "Yogurt", "Eggs", "Butter"] },
+                    { "id": "A10", "name": "Canned Goods & Pasta", "categories": ["Canned Tomatoes", "Beans", "Pasta"] },
+                    { "id": "A12", "name": "Baking & Spices", "categories": ["Flour", "Sugar", "Spices (Baking)", "Oils"] },
+                    { "id": "A15", "name": "International Foods", "categories": ["Asian Goods", "Latin American", "British Foods"] },
+                    { "id": "A18", "name": "Snacks & Cereal", "categories": ["Cereal", "Chips", "Cookies"] },
+                ],
+                "section_map": {
+                    "Meat": "Back Wall Freezer Section",
+                    "Deli": "Near Front Entrance Counter",
+                    "Seafood": "Specialty Counter",
+                    "Frozen": "Freezer Aisle - Middle of Store"
+                }
+            }
+        };
+
+        const INGREDIENT_CATEGORY_MAP = [
+            { keywords: ["onion", "garlic", "ginger", "potato", "carrot", "tomato", "chili", "cilantro", "curry leaves"], category: "Fresh Vegetables", location_id: "A01" },
+            { keywords: ["spinach", "lettuce", "kale"], category: "Leafy Greens", location_id: "A01" },
+            { keywords: ["lemon", "lime", "tamarind"], category: "Fruits", location_id: "A01" },
+            { keywords: ["milk", "cream", "yogurt"], category: "Dairy", location_id: "A07" },
+            { keywords: ["eggs"], category: "Eggs", location_id: "A07" },
+            { keywords: ["flour", "sugar", "baking soda", "rice", "lentils", "dal"], category: "Baking & Spices", location_id: "A12" },
+            { keywords: ["oil", "ghee", "mustard seeds", "fenugreek"], category: "Oils", location_id: "A12" },
+            { keywords: ["canned tomato", "sambar powder", "asafoetida"], category: "Canned Goods & Spices", location_id: "A10" },
+            { keywords: ["chicken", "beef", "pork"], category: "Meat", location_id: "SECTION:Meat" },
+            { keywords: ["fish", "shrimp", "salmon"], category: "Seafood", location_id: "SECTION:Seafood" },
+            { keywords: ["turmeric", "cumin", "coriander", "paprika", "chili powder"], category: "Spices (General)", location_id: "A12" }
+        ];
+
+        // --- 2. HTML ELEMENT REFERENCES ---
+        const dishInput = document.getElementById('dish-input');
+        const servingsInput = document.getElementById('servings-input');
+        const generateButton = document.getElementById('generate-button');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const errorMessage = document.getElementById('error-message');
+        const resultsContainer = document.getElementById('results-container');
+        const recipeTitle = document.getElementById('recipe-title');
+        const recipeMeta = document.getElementById('recipe-meta');
+        const ingredientList = document.getElementById('ingredient-list');
+        const recipeSteps = document.getElementById('recipe-steps').querySelector('ol');
+        
+        // --- 3. CONFIGURATION & UTILITIES ---
+        const apiKey = ""; // API Key is empty as per instructions
+        const modelName = 'gemini-1.5-flash'; // Updated model
+        const storeId = "SR101_PARSIPPANY";
+
+        async function fetchWithRetry(url, options, maxRetries = 3) {
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (error) {
+                    if (attempt === maxRetries - 1) {
+                        console.error("API request failed after max retries:", error);
+                        throw new Error("Could not connect to the AI service. Please try again.");
+                    }
+                    const delay = Math.pow(2, attempt) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+        
+        function mapIngredientToLocation(ingredientName) {
+            const normalizedName = ingredientName.toLowerCase();
+            const currentStore = STORE_LAYOUT[storeId];
+            const match = INGREDIENT_CATEGORY_MAP.find(item => item.keywords.some(keyword => normalizedName.includes(keyword)));
+            if (match) {
+                const locationId = match.location_id;
+                if (locationId.startsWith("SECTION:")) {
+                    const sectionKey = locationId.replace("SECTION:", "");
+                    const location = currentStore.section_map[sectionKey] || `Section: ${sectionKey}`;
+                    return { location: `Section: ${location}` };
+                } else {
+                    const aisle = currentStore.aisle_map.find(a => a.id === locationId);
+                    const location = aisle ? `Aisle ${aisle.id} - ${aisle.name}` : `Aisle ID ${locationId}`;
+                    return { location };
+                }
+            }
+            return { location: "Aisle A15 - International/Misc." };
+        }
+
+        /**
+         * Calls the Gemini API to get a structured recipe object.
+         * @param {string} dishName
+         * @param {number} servings
+         * @returns {Promise<object>} The structured recipe data.
+         */
+        async function fetchStructuredRecipe(dishName, servings) {
+            // POST to our backend Flask endpoint which wraps the generative AI call.
+            const resp = await fetch('/process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dish: dishName, servings })
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error || `Server returned ${resp.status}`);
+            }
+
+            return await resp.json();
+        }
+
+        /**
+         * Main application logic executed on button click.
+         */
+        async function handleGenerate() {
+            const dishName = dishInput.value.trim();
+            const servings = parseInt(servingsInput.value, 10);
+
+            if (!dishName || !servings || servings < 1) {
+                errorMessage.textContent = "Please enter a valid dish name and number of servings.";
+                errorMessage.classList.remove('hidden');
+                return;
+            }
+
+            // Reset UI
+            errorMessage.classList.add('hidden');
+            resultsContainer.classList.add('hidden');
+            ingredientList.innerHTML = '';
+            recipeSteps.innerHTML = '';
+            recipeMeta.innerHTML = '';
+            loadingIndicator.classList.remove('hidden');
+            generateButton.disabled = true;
+
+            try {
+                // 1. Fetch structured recipe from AI
+                const recipeData = await fetchStructuredRecipe(dishName, servings);
+
+                // 2. Render recipe title and metadata
+                recipeTitle.textContent = recipeData.title || "Your Recipe";
+                recipeMeta.innerHTML = `
+                    <span class="flex items-center gap-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" /></svg>
+                        <span>Serves ${recipeData.servings}</span>
+                    </span>
+                    <span class="flex items-center gap-1.5">
+                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.414-1.414L11 10.586V6z" clip-rule="evenodd" /></svg>
+                        <span>${recipeData.timeMinutes} minutes</span>
+                    </span>`;
+
+                // 3. Map locations and render ingredient list
+                if (recipeData.ingredients && recipeData.ingredients.length > 0) {
+                    recipeData.ingredients.forEach(ing => {
+                        const { location } = mapIngredientToLocation(ing.name);
+                        const listItem = document.createElement('li');
+                        listItem.className = 'flex justify-between items-start gap-2 bg-white p-3 rounded-lg shadow-sm border border-gray-100';
+                        listItem.innerHTML = `
+                            <span class="font-medium text-gray-700">${ing.qty} ${ing.unit} ${ing.name}</span>
+                            <span class="text-right text-sm font-semibold text-green-600 bg-green-50 px-3 py-1 rounded-full whitespace-nowrap">${location}</span>
+                        `;
+                        ingredientList.appendChild(listItem);
+                    });
+                } else {
+                    ingredientList.innerHTML = `<li class="text-red-500">Could not extract ingredients.</li>`;
+                }
+
+                // 4. Render recipe steps
+                if (recipeData.steps && recipeData.steps.length > 0) {
+                    recipeData.steps.forEach(step => {
+                        const stepItem = document.createElement('li');
+                        stepItem.textContent = step;
+                        recipeSteps.appendChild(stepItem);
+                    });
+                } else {
+                    recipeSteps.innerHTML = `<li>Recipe instructions were not provided.</li>`;
+                }
+
+                resultsContainer.classList.remove('hidden');
+
+            } catch (error) {
+                console.error("Application Error:", error);
+                errorMessage.textContent = error.message;
+                errorMessage.classList.remove('hidden');
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                generateButton.disabled = false;
+            }
+        }
+
+        // --- 4. EVENT LISTENERS ---
+        generateButton.addEventListener('click', handleGenerate);
+        dishInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleGenerate(); });
+        servingsInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleGenerate(); });
+
+    </script>
+</body>
+</html>
